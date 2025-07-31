@@ -3,6 +3,13 @@ pipeline {
 
     environment {
         DOCKER_COMPOSE_FILE = "docker-compose.yml"
+
+        // Variables de l’environnement issues de .env (fixées ici directement)
+        VOTE_PORT = "5000"
+        RESULT_PORT = "5001"
+        DB_NAME = "postgres"
+        DB_USER = "postgres"
+        DB_PASSWORD = "changeme"
     }
 
     stages {
@@ -29,20 +36,6 @@ pipeline {
             }
         }
 
-        stage('Charger les variables d’environnement') {
-            steps {
-                script {
-                    def envVars = readFile('.env').split('\n')
-                    envVars.each {
-                        def pair = it.trim().split('=')
-                        if (pair.length == 2) {
-                            env[pair[0]] = pair[1]
-                        }
-                    }
-                }
-            }
-        }
-
         stage('Build des services') {
             steps {
                 sh 'docker compose -f $DOCKER_COMPOSE_FILE build --pull'
@@ -51,7 +44,7 @@ pipeline {
 
         stage('Démarrage des services') {
             steps {
-                // Ne pas inclure jenkins ici
+                // On exclut Jenkins du démarrage pour éviter le conflit de nom
                 sh 'docker compose -f $DOCKER_COMPOSE_FILE up -d vote result worker redis db'
             }
         }
@@ -61,8 +54,8 @@ pipeline {
                 sh '''
                 docker compose -f $DOCKER_COMPOSE_FILE ps
                 echo "Vérif :"
-                curl -s http://localhost:5000 || echo "Vote app non dispo"
-                curl -s http://localhost:5001 || echo "Result app non dispo"
+                curl -s http://localhost:$VOTE_PORT || echo "Vote app non dispo"
+                curl -s http://localhost:$RESULT_PORT || echo "Result app non dispo"
                 '''
             }
         }
