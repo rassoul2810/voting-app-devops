@@ -2,11 +2,10 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_COMPOSE_FILE = "docker-compose.yml"
+        DOCKER_COMPOSE_FILE = 'docker-compose.yml'
     }
 
     stages {
-
         stage('Vérification Docker & Compose') {
             steps {
                 sh 'docker --version'
@@ -16,7 +15,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git url: 'https://github.com/rassoul2810/voting-app-devops.git', branch: 'main'
+                git 'https://github.com/rassoul2810/voting-app-devops.git'
             }
         }
 
@@ -32,14 +31,13 @@ pipeline {
         stage('Charger les variables d’environnement') {
             steps {
                 script {
-                    def envFile = '.env'
-                    if (fileExists(envFile)) {
+                    if (fileExists('.env')) {
                         echo ".env trouvé, chargement des variables..."
-                        def envVars = readFile(envFile).split('\n')
-                        envVars.each {
-                            def pair = it.trim().split('=')
-                            if (pair.length == 2) {
-                                env[pair[0]] = pair[1]
+                        def envContent = readFile('.env').split('\n')
+                        for (line in envContent) {
+                            if (line.trim() && line.contains('=')) {
+                                def (key, value) = line.tokenize('=')
+                                env."${key.trim()}" = value.trim()
                             }
                         }
                     } else {
@@ -51,61 +49,76 @@ pipeline {
 
         stage('Build des services') {
             steps {
-                sh 'docker compose -f $DOCKER_COMPOSE_FILE build --pull'
+                sh "docker compose -f $DOCKER_COMPOSE_FILE build --pull"
             }
         }
 
         stage('Démarrage des services (sauf Jenkins)') {
             steps {
-                sh '''
-                SERVICES=$(docker compose config --services | grep -v jenkins | tr '\n' ' ')
-                docker compose -f $DOCKER_COMPOSE_FILE up -d $SERVICES
-                '''
+                script {
+                    def services = sh(script: "docker compose config --services | grep -v jenkins | tr '\\n' ' '", returnStdout: true).trim()
+                    sh "docker compose -f $DOCKER_COMPOSE_FILE up -d ${services}"
+                }
             }
         }
 
         stage('Vérification des services') {
             steps {
                 sh '''
-                docker compose -f $DOCKER_COMPOSE_FILE ps
-                echo "Vérification applicative..."
-                curl -s http://localhost:5000 || echo "Vote app non dispo"
-                curl -s http://localhost:5001 || echo "Result app non dispo"
+                echo "Vérification des services..."
+                docker ps
                 '''
             }
         }
 
+        // BONUS 1 - Vérif CURL
         stage('Bonus: Analyse et Vérif') {
             steps {
-                echo "Analyse des logs des services..."
-                sh 'docker compose logs --tail=20'
+                sh '''
+                echo "Vérification avec curl..."
+                curl -s --fail http://localhost:$VOTE_PORT || echo "Vote app KO"
+                curl -s --fail http://localhost:$RESULT_PORT || echo "Result app KO"
+                '''
             }
         }
 
+        // BONUS 2 - Résilience Test
         stage('Bonus: Résilience') {
             steps {
-                echo "Test de redémarrage contrôlé"
-                sh 'docker compose restart'
-                sh 'sleep 5'
+                sh '''
+                echo "Redémarrage test du vote-app..."
+                docker restart voting-app
+                sleep 3
+                docker ps | grep voting-app
+                '''
             }
         }
 
+        // BONUS 3 - Rapport HTML
         stage('Bonus: Rapport HTML') {
             steps {
-                echo "Génération d’un faux rapport HTML"
-                writeFile file: 'rapport.html', text: '<html><body><h1>✔ Rapport OK</h1></body></html>'
-                archiveArtifacts artifacts: 'rapport.html', fingerprint: true
+                sh '''
+                mkdir -p build-report
+                echo "<html><head><title>Rapport Build</title></head><body>" > build-report/index.html
+                echo "<h1>Rapport de Build Voting App</h1>" >> build-report/index.html
+                echo "<p>Date: $(date)</p>" >> build-report/index.html
+                echo "<p>Commit: $(git log -1 --pretty=format:'%h - %s (%ci)')</p>" >> build-report/index.html
+                echo "<pre>" >> build-report/index.html
+                docker compose ps >> build-report/index.html
+                echo "</pre>" >> build-report/index.html
+                echo "</body></html>" >> build-report/index.html
+                '''
+                archiveArtifacts artifacts: 'build-report/**', fingerprint: true
             }
         }
     }
 
     post {
-        always {
-            echo 'Pipeline terminé.'
+        success {
+            echo 'Pipeline terminé avec succès.'
         }
         failure {
-            echo 'Pipeline en échec.'
+            echo 'Pipeline échoué.'
         }
     }
 }
-
