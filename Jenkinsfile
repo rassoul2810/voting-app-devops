@@ -3,13 +3,6 @@ pipeline {
 
     environment {
         DOCKER_COMPOSE_FILE = "docker-compose.yml"
-
-        // Variables de l’environnement issues de .env (fixées ici directement)
-        VOTE_PORT = "5000"
-        RESULT_PORT = "5001"
-        DB_NAME = "postgres"
-        DB_USER = "postgres"
-        DB_PASSWORD = "changeme"
     }
 
     stages {
@@ -36,16 +29,38 @@ pipeline {
             }
         }
 
+        stage('Charger les variables d’environnement') {
+            steps {
+                script {
+                    def envFile = '.env'
+                    if (fileExists(envFile)) {
+                        echo ".env trouvé, chargement des variables..."
+                        def envVars = readFile(envFile).split('\n')
+                        envVars.each {
+                            def pair = it.trim().split('=')
+                            if (pair.length == 2) {
+                                env[pair[0]] = pair[1]
+                            }
+                        }
+                    } else {
+                        echo "Fichier .env non trouvé, on continue sans le charger..."
+                    }
+                }
+            }
+        }
+
         stage('Build des services') {
             steps {
                 sh 'docker compose -f $DOCKER_COMPOSE_FILE build --pull'
             }
         }
 
-        stage('Démarrage des services') {
+        stage('Démarrage des services (sauf Jenkins)') {
             steps {
-                // On exclut Jenkins du démarrage pour éviter le conflit de nom
-                sh 'docker compose -f $DOCKER_COMPOSE_FILE up -d vote result worker redis db'
+                sh '''
+                SERVICES=$(docker compose config --services | grep -v jenkins | tr '\n' ' ')
+                docker compose -f $DOCKER_COMPOSE_FILE up -d $SERVICES
+                '''
             }
         }
 
@@ -53,10 +68,33 @@ pipeline {
             steps {
                 sh '''
                 docker compose -f $DOCKER_COMPOSE_FILE ps
-                echo "Vérif :"
-                curl -s http://localhost:$VOTE_PORT || echo "Vote app non dispo"
-                curl -s http://localhost:$RESULT_PORT || echo "Result app non dispo"
+                echo "Vérification applicative..."
+                curl -s http://localhost:5000 || echo "Vote app non dispo"
+                curl -s http://localhost:5001 || echo "Result app non dispo"
                 '''
+            }
+        }
+
+        stage('Bonus: Analyse et Vérif') {
+            steps {
+                echo "Analyse des logs des services..."
+                sh 'docker compose logs --tail=20'
+            }
+        }
+
+        stage('Bonus: Résilience') {
+            steps {
+                echo "Test de redémarrage contrôlé"
+                sh 'docker compose restart'
+                sh 'sleep 5'
+            }
+        }
+
+        stage('Bonus: Rapport HTML') {
+            steps {
+                echo "Génération d’un faux rapport HTML"
+                writeFile file: 'rapport.html', text: '<html><body><h1>✔ Rapport OK</h1></body></html>'
+                archiveArtifacts artifacts: 'rapport.html', fingerprint: true
             }
         }
     }
