@@ -16,11 +16,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[url: 'https://github.com/rassoul2810/voting-app-devops.git']]
-                ])
+                git url: 'https://github.com/rassoul2810/voting-app-devops.git', branch: 'main'
             }
         }
 
@@ -36,19 +32,18 @@ pipeline {
         stage('Charger les variables d’environnement') {
             steps {
                 script {
-                    if (fileExists('.env')) {
+                    def envFile = '.env'
+                    if (fileExists(envFile)) {
                         echo ".env trouvé, chargement des variables..."
-                        def envVars = readFile('.env').split('\n')
-                        for (line in envVars) {
-                            if (line.trim() && !line.startsWith('#')) {
-                                def pair = line.split('=')
-                                if (pair.length == 2) {
-                                    env[pair[0].trim()] = pair[1].trim()
-                                }
+                        def envVars = readFile(envFile).split('\n')
+                        envVars.each {
+                            def pair = it.trim().split('=')
+                            if (pair.length == 2) {
+                                env[pair[0]] = pair[1]
                             }
                         }
                     } else {
-                        echo "Fichier .env non trouvé, passage..."
+                        echo "Fichier .env non trouvé, on continue sans le charger..."
                     }
                 }
             }
@@ -63,9 +58,8 @@ pipeline {
         stage('Démarrage des services (sauf Jenkins)') {
             steps {
                 sh '''
-                docker compose -f $DOCKER_COMPOSE_FILE up -d \
-                --remove-orphans \
-                --scale jenkins=0 || true
+                SERVICES=$(docker compose config --services | grep -v jenkins | tr '\n' ' ')
+                docker compose -f $DOCKER_COMPOSE_FILE up -d $SERVICES
                 '''
             }
         }
@@ -74,34 +68,32 @@ pipeline {
             steps {
                 sh '''
                 docker compose -f $DOCKER_COMPOSE_FILE ps
-                echo "Vérif des apps :"
-                curl -s http://localhost:5000 || echo "Vote app indisponible"
-                curl -s http://localhost:5001 || echo "Result app indisponible"
+                echo "Vérification applicative..."
+                curl -s http://localhost:5000 || echo "Vote app non dispo"
+                curl -s http://localhost:5001 || echo "Result app non dispo"
                 '''
             }
         }
 
-        // BONUS
         stage('Bonus: Analyse et Vérif') {
             steps {
-                sh 'docker stats --no-stream || true'
+                echo "Analyse des logs des services..."
+                sh 'docker compose logs --tail=20'
             }
         }
 
         stage('Bonus: Résilience') {
             steps {
-                sh '''
-                docker compose -f $DOCKER_COMPOSE_FILE restart
-                echo "Redémarrage effectué pour tester la résilience"
-                '''
+                echo "Test de redémarrage contrôlé"
+                sh 'docker compose restart'
+                sh 'sleep 5'
             }
         }
 
         stage('Bonus: Rapport HTML') {
             steps {
-                sh '''
-                echo "<html><body><h1>Rapport Jenkins OK</h1></body></html>" > rapport.html
-                '''
+                echo "Génération d’un faux rapport HTML"
+                writeFile file: 'rapport.html', text: '<html><body><h1>✔ Rapport OK</h1></body></html>'
                 archiveArtifacts artifacts: 'rapport.html', fingerprint: true
             }
         }
@@ -111,11 +103,8 @@ pipeline {
         always {
             echo 'Pipeline terminé.'
         }
-        success {
-            echo 'Succès total du pipeline.'
-        }
         failure {
-            echo 'Pipeline échoué.'
+            echo 'Pipeline en échec.'
         }
     }
 }
