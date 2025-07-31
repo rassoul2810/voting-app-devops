@@ -7,62 +7,47 @@ pipeline {
 
     stages {
 
-        stage('🔍 Vérification des outils') {
+        stage('Vérification Docker & Compose') {
             steps {
-                sh 'echo 🔍 Vérification de Docker et Compose...'
                 sh 'docker --version'
                 sh 'docker compose version'
             }
         }
 
-        stage('🧬 Cloner le dépôt Git') {
+        stage('Checkout') {
             steps {
-                git url: 'https://github.com/MohamedSadio/voting-app-project.git', branch: 'main'
+                git url: 'https://github.com/rassoul2810/voting-app-devops.git', branch: 'main'
             }
         }
 
-        stage('🧹 Nettoyage SÉLECTIF Docker (pas Jenkins !)') {
+        stage('Nettoyage soft') {
             steps {
                 sh '''
-                    echo "🧹 Suppression des services Voting SAUF Jenkins..."
-                    docker rm -f voting-db voting-app voting-result voting-worker voting-redis 2>/dev/null || true
-
-                    echo "🧼 Suppression des volumes Voting..."
-                    docker volume rm voting-db-data 2>/dev/null || true
-
-                    echo "🔁 Nettoyage conteneurs inutilisés..."
-                    docker container prune -f || true
-
-                    echo "🔗 Création réseaux si absents..."
-                    docker network create --driver bridge voting-backend || true
-                    docker network create --driver bridge voting-frontend || true
+                echo "Suppression des conteneurs voting sauf Jenkins..."
+                docker ps -a --format '{{.Names}}' | grep voting- | grep -v voting-jenkins | xargs -r docker rm -f || true
                 '''
             }
         }
 
-        stage('🔧 Build des images Docker') {
+        stage('Build des services') {
             steps {
-                sh 'echo 🔧 Build des images avec Docker Compose...'
-                sh 'docker compose -f $DOCKER_COMPOSE_FILE build --pull || true'
+                sh 'docker compose -f $DOCKER_COMPOSE_FILE build --pull'
             }
         }
 
-        stage('🚀 Déploiement de l’application') {
+        stage('Démarrage des services') {
             steps {
-                sh 'echo 🚀 Lancement des services...'
-                sh 'docker compose -f $DOCKER_COMPOSE_FILE up -d || true'
+                sh 'docker compose -f $DOCKER_COMPOSE_FILE up -d'
             }
         }
 
-        stage('✅ Vérification des services') {
+        stage('Vérification des services') {
             steps {
                 sh '''
-                    echo "🔍 État des services Docker Compose :"
-                    docker compose -f $DOCKER_COMPOSE_FILE ps || true
-
-                    echo "🌐 Test de connectivité des applis :"
-                    curl -s http://localhost:5000 || echo "⚠️ Vote app non dispo"
-                    curl -s http://localhost:5001 || echo "⚠️ Result app non dispo"
+                docker compose -f $DOCKER_COMPOSE_FILE ps
+                echo "Vérif :"
+                curl -s http://localhost:5000 || echo "Vote app non dispo"
+                curl -s http://localhost:5001 || echo "Result app non dispo"
                 '''
             }
         }
@@ -70,12 +55,10 @@ pipeline {
 
     post {
         always {
-            echo '📦 Pipeline terminé (succès ou échec).'
+            echo 'Pipeline terminé.'
         }
         failure {
-            echo '💥 Échec du pipeline. Logs récents :'
-            sh 'docker compose -f $DOCKER_COMPOSE_FILE ps || true'
+            echo 'Pipeline en échec.'
         }
     }
 }
-

@@ -1,8 +1,5 @@
-version: '3.8'
-
 services:
 
-  # Cache Redis
   redis:
     image: redis:7-alpine
     command: redis-server --save "" --appendonly no
@@ -14,9 +11,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
 
-  # Base de données PostgreSQL
   db:
     image: postgres:15-alpine
     container_name: voting-db
@@ -33,13 +28,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 0s
 
-  # Service Worker (.NET)
   worker:
-    build: 
+    build:
       context: ./worker
-      dockerfile: Dockerfile
     container_name: voting-worker
     depends_on:
       redis:
@@ -56,11 +48,9 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
     restart: unless-stopped
 
-  # Application de Vote (Python)
   vote:
     build:
       context: ./vote
-      dockerfile: Dockerfile
     container_name: voting-app
     ports:
       - "${VOTE_PORT}:80"
@@ -74,11 +64,9 @@ services:
       REDIS_HOST: redis
     restart: unless-stopped
 
-  # Application de Résultats (Node.js)
   result:
     build:
       context: ./result
-      dockerfile: Dockerfile
     container_name: voting-result
     ports:
       - "${RESULT_PORT}:80"
@@ -95,34 +83,26 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
     restart: unless-stopped
 
-  # Jenkins
   jenkins:
-    image: jenkins/jenkins:lts
+    build:
+      context: ./jenkins
     container_name: voting-jenkins
     ports:
       - "8080:8080"
       - "50000:50000"
     volumes:
       - jenkins-data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - frontend-network
     restart: unless-stopped
 
-# Réseaux Docker
 networks:
   frontend-network:
     driver: bridge
-    name: voting-frontend
   backend-network:
     driver: bridge
-    name: voting-backend
 
-# Volumes persistants
 volumes:
   db-data:
-    driver: local
-    name: voting-db-data
   jenkins-data:
-    driver: local
-    name: voting-jenkins-data
-
