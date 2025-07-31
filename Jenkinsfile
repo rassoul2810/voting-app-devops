@@ -29,6 +29,20 @@ pipeline {
             }
         }
 
+        stage('Charger les variables d’environnement') {
+            steps {
+                script {
+                    def envVars = readFile('.env').split('\n')
+                    envVars.each {
+                        def pair = it.trim().split('=')
+                        if (pair.length == 2) {
+                            env[pair[0]] = pair[1]
+                        }
+                    }
+                }
+            }
+        }
+
         stage('Build des services') {
             steps {
                 sh 'docker compose -f $DOCKER_COMPOSE_FILE build --pull'
@@ -37,7 +51,8 @@ pipeline {
 
         stage('Démarrage des services') {
             steps {
-                sh 'docker compose -f $DOCKER_COMPOSE_FILE up -d'
+                // Ne pas inclure jenkins ici
+                sh 'docker compose -f $DOCKER_COMPOSE_FILE up -d vote result worker redis db'
             }
         }
 
@@ -62,3 +77,4 @@ pipeline {
         }
     }
 }
+
