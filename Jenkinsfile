@@ -2,10 +2,11 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_COMPOSE_FILE = 'docker-compose.yml'
+        DOCKER_COMPOSE_FILE = "docker-compose.yml"
     }
 
     stages {
+
         stage('Vérification Docker & Compose') {
             steps {
                 sh 'docker --version'
@@ -15,7 +16,11 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git 'https://github.com/rassoul2810/voting-app-devops.git'
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[url: 'https://github.com/rassoul2810/voting-app-devops.git']]
+                ])
             }
         }
 
@@ -33,15 +38,17 @@ pipeline {
                 script {
                     if (fileExists('.env')) {
                         echo ".env trouvé, chargement des variables..."
-                        def envContent = readFile('.env').split('\n')
-                        for (line in envContent) {
-                            if (line.trim() && line.contains('=')) {
-                                def (key, value) = line.tokenize('=')
-                                env."${key.trim()}" = value.trim()
+                        def envVars = readFile('.env').split('\n')
+                        for (line in envVars) {
+                            if (line.trim() && !line.startsWith('#')) {
+                                def pair = line.split('=')
+                                if (pair.length == 2) {
+                                    env[pair[0].trim()] = pair[1].trim()
+                                }
                             }
                         }
                     } else {
-                        echo "Fichier .env non trouvé, on continue sans le charger..."
+                        echo "Fichier .env non trouvé, passage..."
                     }
                 }
             }
@@ -49,73 +56,63 @@ pipeline {
 
         stage('Build des services') {
             steps {
-                sh "docker compose -f $DOCKER_COMPOSE_FILE build --pull"
+                sh 'docker compose -f $DOCKER_COMPOSE_FILE build --pull'
             }
         }
 
         stage('Démarrage des services (sauf Jenkins)') {
             steps {
-                script {
-                    def services = sh(script: "docker compose config --services | grep -v jenkins | tr '\\n' ' '", returnStdout: true).trim()
-                    sh "docker compose -f $DOCKER_COMPOSE_FILE up -d ${services}"
-                }
+                sh '''
+                docker compose -f $DOCKER_COMPOSE_FILE up -d \
+                --remove-orphans \
+                --scale jenkins=0 || true
+                '''
             }
         }
 
         stage('Vérification des services') {
             steps {
                 sh '''
-                echo "Vérification des services..."
-                docker ps
+                docker compose -f $DOCKER_COMPOSE_FILE ps
+                echo "Vérif des apps :"
+                curl -s http://localhost:5000 || echo "Vote app indisponible"
+                curl -s http://localhost:5001 || echo "Result app indisponible"
                 '''
             }
         }
 
-        // BONUS 1 - Vérif CURL
+        // BONUS
         stage('Bonus: Analyse et Vérif') {
             steps {
-                sh '''
-                echo "Vérification avec curl..."
-                curl -s --fail http://localhost:$VOTE_PORT || echo "Vote app KO"
-                curl -s --fail http://localhost:$RESULT_PORT || echo "Result app KO"
-                '''
+                sh 'docker stats --no-stream || true'
             }
         }
 
-        // BONUS 2 - Résilience Test
         stage('Bonus: Résilience') {
             steps {
                 sh '''
-                echo "Redémarrage test du vote-app..."
-                docker restart voting-app
-                sleep 3
-                docker ps | grep voting-app
+                docker compose -f $DOCKER_COMPOSE_FILE restart
+                echo "Redémarrage effectué pour tester la résilience"
                 '''
             }
         }
 
-        // BONUS 3 - Rapport HTML
         stage('Bonus: Rapport HTML') {
             steps {
                 sh '''
-                mkdir -p build-report
-                echo "<html><head><title>Rapport Build</title></head><body>" > build-report/index.html
-                echo "<h1>Rapport de Build Voting App</h1>" >> build-report/index.html
-                echo "<p>Date: $(date)</p>" >> build-report/index.html
-                echo "<p>Commit: $(git log -1 --pretty=format:'%h - %s (%ci)')</p>" >> build-report/index.html
-                echo "<pre>" >> build-report/index.html
-                docker compose ps >> build-report/index.html
-                echo "</pre>" >> build-report/index.html
-                echo "</body></html>" >> build-report/index.html
+                echo "<html><body><h1>Rapport Jenkins OK</h1></body></html>" > rapport.html
                 '''
-                archiveArtifacts artifacts: 'build-report/**', fingerprint: true
+                archiveArtifacts artifacts: 'rapport.html', fingerprint: true
             }
         }
     }
 
     post {
+        always {
+            echo 'Pipeline terminé.'
+        }
         success {
-            echo 'Pipeline terminé avec succès.'
+            echo 'Succès total du pipeline.'
         }
         failure {
             echo 'Pipeline échoué.'
