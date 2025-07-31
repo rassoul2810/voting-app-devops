@@ -3,9 +3,17 @@ pipeline {
 
     environment {
         DOCKER_COMPOSE_FILE = "docker-compose.yml"
+
+        // Variables de l’environnement issues de .env (fixées ici directement)
+        VOTE_PORT = "5000"
+        RESULT_PORT = "5001"
+        DB_NAME = "postgres"
+        DB_USER = "postgres"
+        DB_PASSWORD = "changeme"
     }
 
     stages {
+
         stage('Vérification Docker & Compose') {
             steps {
                 sh 'docker --version'
@@ -28,20 +36,6 @@ pipeline {
             }
         }
 
-        stage('Charger les variables d’environnement') {
-            steps {
-                script {
-                    def envContent = readFile('.env')
-                    envContent.split('\n').each { line ->
-                        def pair = line.trim().split('=')
-                        if (pair.length == 2) {
-                            env[pair[0]] = pair[1]
-                        }
-                    }
-                }
-            }
-        }
-
         stage('Build des services') {
             steps {
                 sh 'docker compose -f $DOCKER_COMPOSE_FILE build --pull'
@@ -50,65 +44,19 @@ pipeline {
 
         stage('Démarrage des services') {
             steps {
-                sh '''
-                echo "Lancement des services (sans Jenkins)..."
-                docker compose -f $DOCKER_COMPOSE_FILE up -d --remove-orphans \
-                  $(docker compose config --services | grep -v jenkins)
-                '''
+                // On exclut Jenkins du démarrage pour éviter le conflit de nom
+                sh 'docker compose -f $DOCKER_COMPOSE_FILE up -d vote result worker redis db'
             }
         }
 
         stage('Vérification des services') {
             steps {
                 sh '''
-                echo "Vérification de l’état des services..."
                 docker compose -f $DOCKER_COMPOSE_FILE ps
-
-                echo "Test endpoints:"
-                curl -s http://localhost:5000 || echo "Vote app non dispo"
-                curl -s http://localhost:5001 || echo "Result app non dispo"
+                echo "Vérif :"
+                curl -s http://localhost:$VOTE_PORT || echo "Vote app non dispo"
+                curl -s http://localhost:$RESULT_PORT || echo "Result app non dispo"
                 '''
-            }
-        }
-
-        // BONUS Niveau 1 : Qualité & Sécurité
-        stage('Bonus: Analyse et Vérif') {
-            steps {
-                sh '''
-                echo "Vérification du formatage Python (vote/)..."
-                docker run --rm -v $(pwd)/vote:/app -w /app python:3.11-slim bash -c "pip install black && black --check . || true"
-
-                echo "Scan de sécurité Docker (image vote)..."
-                docker scan voting-app2-vote || true
-
-                echo "État final des conteneurs :"
-                docker ps -a
-                '''
-            }
-        }
-
-        // BONUS Niveau 2 : Résilience
-        stage('Bonus: Résilience') {
-            steps {
-                sh '''
-                echo "Relance des conteneurs tombés (si besoin)..."
-                down=$(docker ps -a --filter 'status=exited' --format '{{.Names}}')
-                for container in $down; do
-                    echo "Restarting $container..."
-                    docker restart $container
-                done
-                '''
-            }
-        }
-
-        // BONUS Niveau 3 : Rapport HTML
-        stage('Bonus: Rapport HTML') {
-            steps {
-                sh '''
-                mkdir -p reports
-                echo "<html><body><h2> Déploiement réussi</h2><p>Tout est au vert </p></body></html>" > reports/index.html
-                '''
-                archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
             }
         }
     }
