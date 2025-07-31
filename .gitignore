@@ -1,0 +1,6 @@
+jenkins-data/
+.env
+*.log
+*.pyc
+__pycache__/
+
